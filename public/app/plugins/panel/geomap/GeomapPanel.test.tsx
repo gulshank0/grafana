@@ -551,6 +551,46 @@ describe('GeomapPanel - View Listener', () => {
       expect(mockMap.addLayer).toHaveBeenCalled();
       expect(mockMap.addInteraction).toHaveBeenCalled();
     });
+
+    // Regression test for https://github.com/grafana/grafana/issues/130773
+    // The OL map reads the container's pixel dimensions synchronously when it
+    // is constructed (inside getNewOpenLayersMap).  Because initMapAsync awaits
+    // several layer-init promises, the browser may complete layout *after* the
+    // map has been constructed but *before* the awaits resolve, leaving the map
+    // with a stale (potentially zero) internal canvas size.  updateSize() must
+    // be called once all layers are ready so OL re-reads the real dimensions
+    // and paints the tiles and markers without requiring a user interaction.
+    it('calls updateSize() after all async layer inits complete so the map renders on first load', async () => {
+      const div = document.createElement('div');
+      (mockMap.updateSize as jest.Mock).mockClear();
+
+      await panel.initMapAsync(div);
+
+      expect(mockMap.updateSize).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls updateSize() via requestAnimationFrame in componentDidMount to handle late layout', () => {
+      // Use fake rAF so we control when the callback fires
+      const rafCallbacks: FrameRequestCallback[] = [];
+      jest.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
+      });
+
+      // Attach a real map so the rAF callback has something to call
+      panel.map = mockMap as unknown as OpenLayersMap;
+      (mockMap.updateSize as jest.Mock).mockClear();
+
+      panel.componentDidMount();
+      // Before the frame fires, updateSize should not have been called yet
+      expect(mockMap.updateSize).not.toHaveBeenCalled();
+
+      // Fire all queued rAF callbacks
+      rafCallbacks.forEach((cb) => cb(0));
+      expect(mockMap.updateSize).toHaveBeenCalledTimes(1);
+
+      (window.requestAnimationFrame as jest.Mock).mockRestore();
+    });
   });
 
   describe('View initialization', () => {

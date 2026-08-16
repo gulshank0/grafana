@@ -112,6 +112,14 @@ export class GeomapPanel extends Component<Props, State> {
 
   componentDidMount() {
     this.panelContext = this.context;
+    // The panel container may not have its final pixel dimensions at the time
+    // initMapAsync first constructs the OL map (the ref fires during the commit
+    // phase, before the browser has completed layout).  Scheduling updateSize()
+    // one animation frame later guarantees the browser has painted and the div
+    // has its real size, so tiles and markers are drawn immediately on load.
+    requestAnimationFrame(() => {
+      this.map?.updateSize();
+    });
   }
 
   componentWillUnmount() {
@@ -345,6 +353,14 @@ export class GeomapPanel extends Component<Props, State> {
     updateMap(this, options);
     setTooltipListeners(this);
     notifyPanelEditor(this, layers, layers.length - 1);
+
+    // All async layer inits are done.  Re-read the container's current pixel
+    // dimensions now — the div may have been 0×0 when the OL map was first
+    // constructed (the ref fires during React's commit phase, before the browser
+    // completes layout), causing tiles and markers to be drawn into a zero-size
+    // canvas and rendering blank.  updateSize() corrects the internal canvas
+    // size so the already-loaded tiles are actually painted.
+    this.map.updateSize();
 
     this.setState({ legends: this.getLegends() });
 
